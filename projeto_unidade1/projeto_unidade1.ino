@@ -25,30 +25,51 @@
  *   e. De 120 a 180 segundos: função linear decrescente que vai de 75% a 0%
  */
 
+#include <avr/io.h>
+#include <avr/interrupt.h>
+#include <util/delay.h>
+
+char dutyCicle = 0;
+
 int main(void){
 
   ADMUX = 0b01000000; // Configurar o Vcc como referencia e a porta A0 como ADC
   ADCSRA = 0b10000100; // Ativa o ADC e configura o divisor do clock (16)
 
-  DDRD |= 1 << PORTD6; // Configura a porta de D6 como saida
+  DDRD = 1 << PORTD6; // Configura a porta de D6 como saida
 
-//  Serial.begin(9600);
+  // Clear OC0A on Compare Match, set OC0A at BOTTOM, (non-inverting mode)
+  TCCR0A  = (1 << COM0A1);
 
-   // Set on match, clear on TOP
-   TCCR1A  = ((1 << COM1A1) | (1 << COM1A0));
+  // Fast PWM, TOP: 0xFF, Update of OCRx at BOTTOM, TOV flag set on MAX
+  TCCR0A |= (1 << WGM00) | (1 << WGM01);
 
-   // Phase + Frequency Correct PWM, Fcpu speed
-   TCCR1B  = ((1 << CS10) | (1 << WGM13));
+  // Overflow interrupt enabled
+  TIMSK0 = (1 << TOIE0);
 
-   OCR1A=0xff00;
+
+  // Set duty cicle
+  OCR0A = (dutyCicle/100.0) * 255;
   
+  // Enable external interrupts
+  sei();
+
+  // No prescaler, starts the timer
+  TCCR0B = (1 << CS00) | (1 << CS02);
+
   while(1){
     ADCSRA |= 0b01000000; // Inicia a leitura
     while(!(ADCSRA & 0b00010000)); // Aguarda termino da leitura 50 - 600
-//    Serial.println(ADC);
     if(ADC <= 200)
       PORTD = 1<<2;
     else
       PORTD = 0;
+
+    _delay_ms(50);
+    dutyCicle = (ADC / 1023.0) * 100;
   }
+}
+
+ISR(TIMER0_OVF_vect){
+  OCR0A = (dutyCicle/100.0) * 255;
 }
