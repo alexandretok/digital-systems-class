@@ -34,14 +34,17 @@
 
 #include <avr/io.h>
 #include <avr/interrupt.h>
+#include <util/delay.h>
 
 char dutyCycle = 0; // Porcentagem do motor
 volatile int quantidadeInterrupts = 0;
 const char interruptsPorSegundo = 61; // (16MHz / prescaler * 256) (Fast PWM Mode) 
-int segundosPassados = 0;
+unsigned char segundosPassados = 0;
 
 bool enviarDados = true;
 bool sistemaAtivado = false;
+
+float alfa = 1.0;
 
 int main(void){
 
@@ -70,25 +73,25 @@ int main(void){
   TCCR0B = (1 << CS00) | (1 << CS02);
 
   Serial.begin(9600);
-  Serial.println("standBy:true");
+  Serial.println("standBy:true;");
 
   while(1){
     if(sistemaAtivado){
-      dutyCycle = curvaDeResfriamento(float(segundosPassados) / 60.0);
+      ADCSRA |= 0b01000000; // Inicia a leitura
+      while(!(ADCSRA & 0b00010000)); // Aguarda termino da leitura
+
+      // Alfa = valor de 0.9 a 1 que sera multiplicado pelo dutyCycle
+      alfa = ADC * 0.000131579 + 0.9;
+      if(alfa < 0.9) alfa = 0.9;
+      if(alfa > 1) alfa = 1;
+      
+      dutyCycle = curvaDeResfriamento(float(segundosPassados) / 60.0) * alfa;
       
       // Verifica se ja se passou mais um segundo, se sim habilita envio de dados
       if(quantidadeInterrupts >= interruptsPorSegundo){
         quantidadeInterrupts = 0;
         segundosPassados++;
         enviarDados = true;
-      }
-  
-      // Verifica se acabou o ciclo de resfriamento, se sim desligar o sistema e reiniciar as variaveis
-      if(float(segundosPassados) / 60.0 > 3.00){
-        sistemaAtivado = false;
-        segundosPassados = 0;
-        quantidadeInterrupts = 0;
-        dutyCycle = 0;
       }
   
       // Envia os dados uma vez por segundo
@@ -100,19 +103,26 @@ int main(void){
          
         Serial.print("tempo:");
         Serial.print(float(segundosPassados) / 60.0);
-        Serial.print("&dutyCycle:");
-        Serial.println(int(dutyCycle));
+        Serial.print(";dutyCycle:");
+        Serial.print(int(dutyCycle));
+        Serial.println(";");
         enviarDados = false;
       }
-      
-      ADCSRA |= 0b01000000; // Inicia a leitura
-      while(!(ADCSRA & 0b00010000)); // Aguarda termino da leitura
-      // Falta definir como o ADC vai afetar o dutyCycle
+
+      // Verifica se acabou o ciclo de resfriamento, se sim desligar o sistema e reiniciar as variaveis
+      if(float(segundosPassados) / 60.0 >= 3.00){
+        Serial.println("systemActivated:false;");
+        Serial.println("standBy:true;");
+        sistemaAtivado = false;
+        segundosPassados = 0;
+        quantidadeInterrupts = 0;
+        dutyCycle = 0;
+      }
     } else {
       // Fica verificando se o botão power foi pressionado
       if(~PIND & (1 << PORTD2)){
         sistemaAtivado = true;
-        Serial.println("systemActivated:true");
+        Serial.println("systemActivated:true;");
       }
     }
   }
